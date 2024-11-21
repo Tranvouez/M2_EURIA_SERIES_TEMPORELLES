@@ -1,0 +1,40 @@
+---
+title: "Séries temporelles : TD et Examens "
+date: "`r Sys.Date()`"
+output: 
+  pdf_document:
+    toc: true
+    number_sections: true
+    toc_depth: 3
+    latex_engine: xelatex
+  header-includes:
+  - \usepackage{fontspec}
+  - \usepackage{unicode-math}
+always_allow_html: true
+html_document: default
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r setup, include = FALSE, warning = FALSE, message = FALSE}
+# Gestion des options sur les chunk  
+knitr::opts_chunk$set(warning = FALSE, 
+                      message = FALSE,
+                      collapse = FALSE,
+                      comment = "",
+                      fig.align = "center", 
+                      out.width = "95%")
+
+# Définition d'une palette de couleurs : 
+palette_couleur = c("#36648B", "#F4A460", "#9AFF9A", "#FFD700", "#838B8B","#EED5B7", "#FF82AB")
+
+```
+
+
+# Partie 1 : TD 
+
+## Exercice 1 : 
+
+
+
