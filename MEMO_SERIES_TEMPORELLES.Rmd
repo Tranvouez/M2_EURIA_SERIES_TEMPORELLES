@@ -17,7 +17,6 @@ editor_options:
     wrap: sentence
 ---
 
-
 ```{r setup, include = FALSE, warning = FALSE, message = FALSE}
 # Gestion des options sur les chunk : 
 knitr::opts_chunk$set(warning = FALSE, 
@@ -36,7 +35,6 @@ palette_couleur = c("#36648B", "#F4A460", "#9AFF9A", "#FFD700", "#838B8B",
 
 # On fixe l'aléatoire pour la reproductibilité des résultats : 
 set.seed(123)
-
 ```
 
 
@@ -115,7 +113,6 @@ acf(x, type = 'covariance', main = "Fonction autocovariance")
 
 ### Fonctions d'autocorrélation et d'autocovariance : 
 
-
 ```{r}
 # Simulation bruit blanc gaussien :
 Time = 1000
@@ -176,8 +173,12 @@ data.frame(
   Bruit_Blanc = p_value > .05
   )
 
+
 ```
 
+```{r echo=FALSE}
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+```
 
 # Travaux dirigés 
 
@@ -427,6 +428,11 @@ Commentaire :
 
 Le processus n'est pas stationnaire il y a une tendance dans la variance.
 
+
+```{r echo=FALSE}
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+```
+
 ## Exercice 2 : 
 
 $$
@@ -492,6 +498,10 @@ A retenir :
 
 Pour un MA(q), on a rho(h)=0 pour h>q. 
 
+```{r echo=FALSE}
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+```
+
 ## Exercice 3 : 
 
 $$ 
@@ -502,6 +512,7 @@ $$
 
 ```{r}
 ar1 = function(alpha, sigma = 1, Time= 1000) {
+  x = numeric(Time)
   x[1] = rnorm(1, sd = sqrt(sigma ^ 2 / (1 - alpha ^ 2)))
   for (t in 2:Time) {
     x[t] = alpha * x[Time- 1] + rnorm(1, sd = sigma)
@@ -547,5 +558,467 @@ legend(
 
 ```
 
+```{r echo=FALSE}
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+```
+
+
 ## Exercice 5 : 
+
+### Simulation du bruit blanc : 
+
+```{r}
+N = 10 ^ 4  #nombre de simulations
+Time = 1000  #longueur des séries temporelles
+rho = NULL
+pv = NULL
+for (n in 1:N) {
+  #on répète l'expérience N fois
+  x = rnorm(Time)  #simulation d'un bruit blanc gaussien
+  rho = rbind(rho, acf(x, plot = FALSE)$acf)  #calcul et stockage ACF (sans tracer le graphique)
+  pv = c(pv, Box.test(x, lag = 5)$p.value) #calcul et stockage p-value du test de Portmenteau
+}
+```
+
+
+### Vérification que $\sqrt(T) \times \hat \rho(h) \sim \mathcal{N}(0,1)$ : 
+
+```{r}
+h = 1 
+hist(sqrt(Time) * rho[, h+1], # La fonction d'autocorrélation commence à 0.
+     main = "Histogramme de sqrt(T) * rho(h)",
+     col = palette_couleur[1])
+
+# Test de normalité : 
+qqplot = qqnorm(sqrt(Time) * rho[, h+1], 
+                main = "QQ-plot de sqrt(T) * rho(h)",
+                col = palette_couleur[1])
+abline(0, 1, col = palette_couleur[2])
+
+```
+Commentaire : 
+
+On peut retrouver des résultats similaires sur les autres valeurs de h.
+
+### L'intervalle de confiance à 95% des coefficients d'auto-corrélation : 
+
+```{r}
+nb_value <-
+  sum(rho[, h + 1] > -1.96 / sqrt(Time) &
+        rho[, h + 1] < 1.96 / sqrt(Time)) / N
+nb_value # Très proche de 0.95 (prendre N assez grand)
+
+alpha = 0.05
+sum(pv > 0.05) / N 
+# HO = c'est un bruit blanc ,  acceptés dans + de 95% des cas
+```
+
+### Vérification sur une simulation MA(1) : 
+
+#### Simulation : 
+
+```{r}
+beta = 0.9
+sigma = 0.1 
+rho = NULL ; pv = NULL
+N = 10 ^ 4
+for (i in 1:N){ 
+  eps = sigma * rnorm(Time + 1)
+  y = eps[2:(Time + 1)] + beta * eps[1:Time]
+  rho = rbind(rho, acf(y, plot = FALSE)$acf)
+  pv = c(pv, Box.test(y, lag = 5)$p.value)
+  }
+```
+
+
+### Vérifier que $\hat \rho(1)$ n'est plus dans l'intervalle pour un MA(1) : 
+
+```{r}
+h = 1 
+nb_value = sum(rho[,h+1] > -1.96/sqrt(Time) & 
+      rho[,h+1] < 1.96/sqrt(Time))/N
+nb_value
+
+# Test du bruit blanc : 
+alpha = 0.05
+sum(pv > alpha) / N
+
+```
+Commentaire : 
+
+L'intervalle de confiance n'est plus respecté pour un MA(1) (on rejette l'hypothèse de bruit blanc).
+
+On rejette l'hypothèse de bruit blanc pour un MA(1) (on a une dépendance entre les valeurs successives).
+
+
+### Test de normalité des rendements dans la modélisation de Black-Scholes : 
+
+
+$$
+X_{t} = ln(\frac{S_{t}}{S_{t-1}}) = ln(S_{t}) - ln(S_{t-1}) \\ 
+S_{t} : \text{Prix de l'actif à l'instant t} \\ 
+Hypothèse : X_{t} \sim \mathcal{N}(\mu, \sigma^2) iid
+$$
+
+#### Importation et représentation graphique : 
+
+```{r}
+x = EuStockMarkets[, 3]
+plot(
+  x,
+  main = "Evolution du prix de l'actif",
+  ylab = "Prix de l'actif",
+  xlab = "Temps",
+  type = "l",
+  col = palette_couleur[1],
+  lwd = 2
+)
+
+acf(
+  x,
+  main = "F° autocorrélation empirique du prix de l'actif",
+  col = palette_couleur[2],
+  lwd = 2,
+  lag.max = 500
+)
+
+```
+
+#### Log différenciation de l'actif : 
+
+```{r}
+y = diff(log(x))
+plot (
+  y,
+  main = "Evolution du rendement de l'actif",
+  ylab = "Rendement de l'actif",
+  xlab = "Temps",
+  type = "l",
+  col = palette_couleur[1],
+  lwd = 2
+)
+
+acf(
+  y,
+  main = "F° autocorrélation empirique du rendement de l'actif",
+  col = palette_couleur[2],
+  lwd = 2,
+  lag.max = 500
+)
+
+```
+#### Test sur le BB et la normalité des rendements : 
+
+```{r}
+Box.test(y, lag = 5) #test de Portmanteau (BB)
+qqnorm(y, 
+       main = "QQ-plot des rendements de l'actif",
+       col = palette_couleur[1])
+qqline(y, col = palette_couleur[2])
+
+shapiro.test(y) #test de normalité des rendements
+```
+
+Rappel : 
+
+Le test de Shapiro permet de tester l'hypothèse nulle de normalité des résidus.
+
+$$ 
+\begin{cases}
+H_0 : \text{Les résidus suivent une loi normale} \\
+H_1 : \text{Les résidus ne suivent pas une loi normale}
+\end{cases}
+$$
+
+
+Le test de Box-Pierce permet de tester l'hypothèse nulle d'indépendance des observations d'une série temporelle.
+
+$$
+\begin{cases}
+H_0 : \rho(1) = 0 \text{, X est un bruit blanc} \\
+H_1 : \rho(1) \neq 0 , \text{X n'est pas un bruit blanc}
+\end{cases}
+$$
+
+Dans notre cas, les log-rendements de la série temporelle ne suivent pas une loi normale mais sont des bruits blancs. C'est-à-dire que les rendements sont indépendants et identiquement distribués.
+
+```{r echo=FALSE}
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+```
+
+## Exercice 6 : 
+
+On se base sur une modèle AR(1) :
+
+$$
+X_{t} = \alpha X_{t-1} + \epsilon_t \text{ avec } \epsilon_t \sim \mathcal{N}(0,1)
+$$
+
+### Créer une fonction d'estimation du maximun de vraissemblance associé à la série temporelle : 
+
+```{r}
+ar1.estim = function(x) {
+  n = length(x)
+  x1 = x[1:(n - 1)]
+  x2 = x[2:n]
+  alpha = sum(x1 * x2) / sum(x1 ^ 2)
+  sigma = sqrt(sum((x2 - alpha * x1) ^ 2) / n)
+  return(c(alpha, sigma))
+}
+
+# Création d'une série temporelle : 
+alpha = 0.9 ; sigma = 0.1 ; Time = 1000
+x = arima.sim(model = list(ar = alpha), n = Time, sd = sigma)
+
+# Fonction créée : 
+yf = ar1.estim(x)
+
+# Estimation R : 
+y = ar(x, aic = FALSE, order.max = 1, demean = FALSE, method = "ols")
+
+# Résultats : 
+data.frame(
+  Explication = c("Vrai valeur", "Estimation F°", "Estimation R"),
+  alpha = round(c(alpha,yf[1], y$ar[1]),4),
+  sigma = round(c(sigma, yf[2], y$var.pred[1]),4))
+```
+
+### Etude sur les estimateurs par simulation : 
+
+```{r}
+Nsimu = 10 ^ 2 ; alpha = 0.9 ; sigma = 0.1 
+tabT = c(20,100,1000,10000) # Différentes longueur de série 
+
+# Matrice de stockage des estimations : 
+alphaols = matrix(0, Nsimu, length(tabT))  
+sigmaols = matrix(0, Nsimu, length(tabT))
+alphamle = matrix(0, Nsimu, length(tabT))
+sigmamle = matrix(0, Nsimu, length(tabT))
+
+for (i in 1:length(tabT)) {
+  T = tabT[i]
+  for (j in 1:Nsimu) {
+    x = arima.sim(model = list(ar = alpha), sd = sigma, n = T)
+    fit = ar(x, aic = FALSE, order.max = 1, demean = FALSE, method = 'ols')
+    alphaols[j, i] = fit$ar
+    sigmaols[j, i] = fit$var.pred
+    fit = ar(x, aic = FALSE, order.max = 1, demean = FALSE, method = 'mle')
+    alphamle[j, i] = fit$ar
+    sigmamle[j, i] = fit$var.pred
+  }
+}
+
+```
+
+#### Comparaison en moyenne : 
+
+```{r}
+# Comparaison du biais des estimateurs :
+data.frame (
+  Duration = tabT,
+  MLE_mean = round(apply(alphamle, 2, mean),4),
+  OLS_mean = round(apply(alphaols, 2, mean),4)
+)
+```
+
+Commentaire :
+
+Au regard des moyennes l'estimateur est asymptotiquement sans biais (biais tend vers 0 lorsque T grandit)
+
+#### Comparaison de la variance des estimateurs : 
+
+```{r}
+data.frame(
+  duration = tabT,
+  MLE = round(apply(alphamle, 2, var),4),
+  OLS = round(apply(alphaols, 2, var),4))
+```
+
+Commentaire : 
+
+La variance des estimateurs tend vers 0 lorsque T grandit (convergence ordre 2)
+
+
+#### Représentation graphique boxplot : 
+
+```{r}
+alpha = cbind(alphaols, alphamle)
+sigma = cbind(sigmaols, sigmamle)
+
+method = cbind(matrix('ols', Nsimu, length(tabT)), matrix('mle', Nsimu, length(tabT)))
+
+longueur = cbind(matrix(rep(tabT, Nsimu), Nsimu, length(tabT), byrow = TRUE),
+                 matrix(rep(tabT, Nsimu), Nsimu, length(tabT), byrow = TRUE))
+
+```
+##### Estimation moyenne des alpha : 
+
+
+```{r}
+boxplot(alpha ~ method + longueur, las = 2, col = palette_couleur[1], 
+        main = "Estimation moyenne d'alpha : méthode et longueurs différentes",
+        ylab = "Valeurs estimées")
+
+abline(h = 0.9, col = palette_couleur[2]) 
+# 0.9 Correspond à la vraie valeur de alpha
+```
+
+
+#### Estimation moyenne de sigma : 
+
+```{r}
+boxplot(sigma ~ method + longueur, las = 2, col = palette_couleur[1], 
+        main = "Estimation moyenne de sigma : méthode et longueurs différentes",
+        ylab = "Valeurs estimées")
+abline(h = 0.1 ^ 2, col = palette_couleur[2])
+
+```
+
+Commentaire :
+
+Les deux méthodes (mle et ols) donnent des résultats proches. La méthode mle semble donner des résultats légèrement meilleurs pour les petits échantillons. On observe une sous-estimation pour les petites séries temporelles (T=20). On observe une convergence lorsque T tend vers l'infini.
+
+
+### Création d'une fonction de prédiction pour le modèle AR(1) : 
+
+Calcul de l'écart type et de la moyenne de la prédiction : 
+
+Prédiction de $X_{t}$ à partir de $(X_1,...,X_{t-h})$: 
+
+
+```{r}
+predictionAR1 = function(x, a, sig, hmax) {
+  return(list(moy = x * a ^ (1:hmax), 
+              sig = sqrt(sig ^ 2 * (1 - a ^ (2 * (1:hmax))) / (1 - a ^ (2)))))
+}
+
+```
+
+
+### Simulation et prédiction : (A reprendre simplification possible dans le code)
+
+```{r}
+alpha = 0.9 ; sig = 0.1 ; Time = 10 ^ 5
+X = arima.sim(model = list(ar = alpha),sd = sig, n= Time)  
+
+moypred = NULL
+sigpred = NULL
+h = 1  #horizon de prévision
+for (t in (h + 1):Time) {
+  pred = predictionAR1(X[t - h], alpha, sig, h)
+  moypred[t] = pred$moy[h]
+  sigpred[t] = pred$sig[h]
+}
+
+IC_pr_value = sum(X > moypred - 1.96 * sigpred &
+      X < moypred + 1.96 * sigpred, na.rm = TRUE) / (Time - h + 1)
+
+cat("Pourcentage de valeur dans l'intervalle = ", round(IC_pr_value,4), "\n")
+
+```
+
+```{r echo=FALSE}
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+```
+
+
+
+## Exercice 7 : 
+
+### Trouver les racines d'un polynôme caractéristique : 
+
+
+```{r}
+cat("Racines du polynôme : ", polyroot(c(1, -.9, .3)), "\n")
+cat("Module des racines : ", Mod(polyroot(c(1, -.9, .3))), "\n")
+
+```
+Commentaire : 
+
+Proposition si le module des racines est supérieur à 1 alors le processus est stationnaire.
+
+### Calcul de l'ACF avec Yule-Walker à l'aide du système d'équations : 
+
+
+
+```{r}
+alpha1 = 0.1
+alpha2 = -0.3
+sigma = 1
+
+mat = cbind(
+  c(1, -alpha1, -alpha2, 0, 0, 0),
+  c(-alpha1, 1 - alpha2, -alpha1, -alpha2, 0, 0),
+  c(-alpha2, 0, 1, -alpha1, -alpha2, 0),
+  c(0, 0, 0, 1, -alpha1, -alpha2),
+  c(0, 0, 0, 0, 1, -alpha1),
+  c(0, 0, 0, 0, 0, 1)
+) 
+b = c(sigma ^ 2, 0, 0, 0, 0, 0)
+
+gamma = solve(mat, b)  #Fonction_autocovariance
+f_autocor = gamma / gamma[1]  # Fonction_autocorrélation
+
+
+```
+
+
+### Simulation et comparaison sur la fonction d'autocorrélation : 
+
+```{r}
+x = arima.sim(model = list(ar = c(alpha1, alpha2)),
+              sd = sigma,
+              n = 10 ^ 4)  
+
+auto_cor_empi <- acf(x, lag.max = 5, plot = FALSE)$acf
+auto_cor_theo <- ARMAacf(ar = c(alpha1, alpha2), lag.max = 5)
+auto_cov_empi <- acf(x, lag.max = 5, type='covariance', plot=FALSE)$acf 
+
+# Affichage des résultats : 
+data.frame(
+  Lag = 1:5,
+  Yule_walker = round(f_autocor[2:6],4),
+  Empirique = round(auto_cor_empi[2:6],4),
+  Théorique = round(auto_cor_theo[2:6],4))
+
+```
+
+###  Création d'une fonction d'estimation Yule-Walker pour un modèle AR(2) : 
+
+On se base uniquement sur le système d'équations preant en compte les 3 premières valeurs de l'ACF.
+
+```{r}
+fitYWAR2 = function(x) {
+  # Afc empirique :
+  gammac = acf(x, lag.max = 2, type = 'covariance',
+               plot = FALSE)$acf  
+  
+  # Matrice A et vecteur b :
+  A = matrix(c(gammac[2], gammac[1], gammac[2], gammac[3], gammac[2], 
+               gammac[1], 1, 0, 0), nrow = 3)
+  b = c(gammac[1], gammac[2], gammac[3])
+  thetamom = solve(A, b)
+  return(thetamom)
+}
+
+# Vérification :
+x = arima.sim(model = list(ar = c(alpha1, alpha2)),
+              sd = sigma,
+              n = 10 ^ 4)
+resultat_r = ar(x, AIC= FALSE, order.max = 2,method = "yule-walker")
+resultat_f = fitYWAR2(x)
+
+# Affichage des résultats : 
+data.frame(
+  Explication = c("Vrai valeur", "Estimation F°", "Estimation R"),
+  alpha1 = round(c(alpha1, resultat_f[1], resultat_r$ar[1]), 4),
+  alpha2 = round(c(alpha2, resultat_f[2], resultat_r$ar[2]), 4),
+  sigma = round(c(sigma, resultat_f[3], resultat_r$var.pred[1]), 4))
+
+```
+
+```{r echo=FALSE}
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+```
+
 
