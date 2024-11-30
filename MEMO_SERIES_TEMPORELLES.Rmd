@@ -17,6 +17,9 @@ editor_options:
     wrap: sentence
 ---
 
+\clearpage
+\newpage
+
 ```{r setup, include = FALSE, warning = FALSE, message = FALSE}
 # Gestion des options sur les chunk : 
 knitr::opts_chunk$set(warning = FALSE, 
@@ -136,7 +139,7 @@ legend(
 ```
 
 
-### Test statistiques sur le bruit blanc : 
+### Tests statistiques sur le bruit blanc : 
 
 Le test de Box-Pierce permet de tester l'hypothèse nulle d'indépendance des observations d'une série temporelle.
 
@@ -176,9 +179,551 @@ data.frame(
 
 ```
 
+## Simulation d'un modèle AR(p) : 
+
+$$ 
+X_t = \alpha_1 X_{t-1} + \alpha_2 X_{t-2} + \alpha_3 X_{t-3} + \epsilon_t \text{ avec } \epsilon_t \sim \mathcal{N}(0,1) \\
+$$ 
+
+### Simulation d'un processus AR(3) :
+
+```{r}
+alpha = c(1,-.2,-.2)
+sig = .1
+p = 3
+x = arima.sim(model = list(ar = alpha),
+              sd = sig, n = 200)
+plot(
+  x,
+  type = "l",
+  col = palette_couleur[1],
+  lwd = 2,
+  main = "Simulation d'un processus AR(3)",
+  ylab = "Valeurs simulées",
+  xlab = "Temps"
+)
+
+```
+### Calcul de la fonction d'autocorrélation théorique : 
+
+```{r}
+lmax = 30
+acfth = ARMAacf(ar = alpha, lag.max = lmax) #fonction autocorrélation théorique
+acfemp = acf(
+  x,
+  lag.max = lmax,
+  main = "Fonction autocorrélation empirique",
+  col = palette_couleur[1],
+  lwd = 2
+) #fonction autocorrélation empirique
+lines(acfemp$lag, acfth, col = palette_couleur[2],
+      lwd = 2) #comparaison
+
+legend(
+  'topright',
+  c('ACF empirique', 'ACF théorique'),
+  col = palette_couleur[1:2],
+  lty = 1,
+  lwd = 2
+)
+
+```
+
+
+### Ajustement d'un modèle AR(p) avec ou sans connaissance de p : 
+
+```{r}
+# Ajustement d'un modèle AR(p) avec connaissance de p :
+y = ar(x, aic = FALSE, order.max = 3, demean = FALSE)
+cat("Paramètres estimés en connaissant p : \n") 
+round(y$ar, 4)
+
+# Ajustement d'un modèle AR(p) sans connaissance de p :
+y2 = ar(x)
+cat("Paramètres estimés sans connaître p : \n")
+round(y2$ar, 4) # Selection de l'ordre optimal
+
+```
+
+### Simulation d'un processus AR(3) non-centré : 
+
+```{r}
+alpha = c(1,-.2,-.2)
+sig = .1
+p = 3
+x = arima.sim(model = list(ar = alpha),
+              sd = sig, n = 200)
+y = x + 1
+fit = ar(y, aic = FALSE, order.max = 3, demean = TRUE) 
+# Demean = TRUE pour centrer la série temporelle
+
+cat('Estimation de la moyenne : ', fit$x.mean, '\n')
+
+```
+### Ajustement d'un modele AR(p) avec la fonction arima :
+
+Commentaire : 
+
+Par défaut la fonction arima centre la série temporelle. 
+
+Inclure la moyenne dans le modèle comme intercept permet de centrer la série temporelle. (option demean = TRUE) dans la fonction ar et inclure.mean = TRUE dans la fonction arima.
+
+```{r echo=FALSE}
+fit = arima(y, order = c(3, 0, 0), include.mean = TRUE) 
+fit
+fit2 = arima(y, order = c(3, 0, 0), include.mean = FALSE)
+fit2
+```
+
+
+### Intervalle de prédiction du modèle AR(3) : 
+
+```{r}
+confint(fit, level = .95) #intervalle de confiance
+```
+
+### Prédiction d'un modèle AR(3) : 
+
+```{r}
+x = arima.sim(model = list(ar = c(1, -.2, -.2)),
+              sd = .1, n = 200)
+fit = ar(x, aic = FALSE, order.max = 3, demean = TRUE)
+pred = predict(fit, n.ahead = 3)
+pred
+```
+
+#### Représentation graphique de la prédiction : 
+
+Commentaire : 
+
+L'intervalle de prédiction est compris entre 80% et 95% de confiance. 
+
+```{r}
+library(forecast)
+pm <- forecast(fit, h = 30)
+plot(pm, main = "Prédiction d'un modèle AR(3)", col = palette_couleur[1])
+
+```
+
+
+## Modélisation ARMA(p,q) :
+
+### Ajustement d'un modèle ARMA(p,q) quand p et q sont connus : 
+
+```{r}
+set.seed(123)
+p = 2 # ordre AR
+q = 2 # ordre MA
+alpha = c(0.9,-0.2) # coefficients AR
+beta = c(0.8,0.5) # coefficients MA
+sigma = 1 # écart-type du bruit
+n = 10^3 # nombre de simulations
+x = arima.sim(model = list(ar = alpha, ma = beta), sd = sigma, n = n) # simulation
+mod = arima(x, order = c(p,0,q)) 
+
+dt = data.frame(
+  alpha_reel = alpha,
+  alpha_estim = mod$coef[1:p],
+  beta_reel = beta,
+  beta_estim = mod$coef[(p+1):(p+q)])
+rownames(dt) = c('lag1', 'lag2')
+round(dt, 4)
+
+```
+
+Commentaire : 
+
+Les paramètres estimés sont proches des paramètres réels. Une augmentation du nombre de simulations permet d'améliorer la précision des estimations.
+
+### Ajustement d'un modèle ARMA(p,q) quand p et q sont inconnus : 
+
+Commentaire : quand les paramètres sont inconnus on peut utiliser des critères d'informations tels que (AIC, BIC) pour sélectionner le meilleur modèle, on doit minimiser ces critères. 
+
+#### Méthode de sélection par boucle : 
+
+```{r}
+pmax = 5 #valeur max pour p
+qmax = 5 #valeur max pour q
+AIC = matrix(0, nrow = pmax + 1, ncol = qmax + 1) #tableau pour stocker les valeurs du AIC
+for (p in 0:pmax) {
+  for (q in 0:qmax) {
+    AIC[p + 1, q + 1] = arima(x, order = c(p, 0, q))$aic #calcul du AIC
+  }
+}
+
+colnames(AIC) <- paste("q =", 0:qmax)
+rownames(AIC) <- paste("p =", 0:pmax)
+AIC
+
+# On renvoie l'indice du minimun de AIC :
+p = which(AIC == min(AIC), arr.ind = TRUE)[1] - 1
+q = which(AIC == min(AIC), arr.ind = TRUE)[2] - 1
+
+cat("Meilleur modèle ARMA(p,q) : p = ", p, " q = ", q, "\n")
+
+```
+
+
+#### Méthode de sélection avec la fonction auto.arima : 
+
+```{r}
+library(forecast)
+auto.arima(x, stationary = TRUE, seasonal = FALSE)
+
+
+# Paramétrages de la fonction : 
+auto.arima(x,stationary = TRUE,seasonal = FALSE,stepwise=FALSE,max.order=10,approximation = FALSE)
+
+```
+
+```{r}
+# Sélection par la méthode du BIC 
+auto.arima(x,stationary = TRUE,seasonal = FALSE,ic="bic",max.order=10)
+```
+
+Commentaire : 
+
+La méthode BIC a tendance à sélectionner moins de paramètres que la méthode AIC. Elle discrimine mieux les modèles complexes.
+
+
+### La prédiction des modélisations ARMA(p,q) : 
+
+
+```{r}
+fit = auto.arima(x, stationary = TRUE, seasonal = FALSE)
+#ajustement du modèle arma, inclut la sélection de modèle
+pm <- forecast(fit, h = 30) #représentation graphique
+plot(pm) # intervalles prédiction à 80% et 95%
+```
+### Vérification de la stationnarité d'un processus ARMA(p,q) : 
+
+```{r}
+
+# Bruit blanc ? 
+tsdiag(fit)
+
+# Test de gaussienneté des résidus :
+shapiro.test(fit$residuals)
+
+qqnorm(fit$residuals, col = palette_couleur[1])
+qqline(fit$residuals, col = palette_couleur[2])
+legend('topleft', c('Résidus', 'Droite de Henry'), col = palette_couleur[1:2], lwd =2)
+
+```
+
+
+### Fonction auto-corrélation d'un processus ARMA(p,q) : 
+
+```{r}
+lmax = 30
+alpha = c(1, -0.2) #partie AR
+beta = c(1, 1) #partie MA
+x = arima.sim(model = list(ar = alpha, ma = beta),
+              sd = 1,
+              n = 200)
+acfth = ARMAacf(ar = alpha, 
+                ma = beta, 
+                lag.max = lmax) #fonction autocorrélation théorique
+acfemp = acf(x, lag.max = lmax, 
+             main = "Fonction autocorrélation empirique",
+             col = palette_couleur[1],
+             lwd = 2) #fonction autocorrélation empirique
+lines(acfemp$lag, acfth, col = palette_couleur[2],
+      lwd = 2) #comparaison
+legend(
+  'topright',
+  c('ACF empirique', 'ACF théorique'),
+  col = palette_couleur[1:2],
+  lty = 1,
+  lwd = 2
+)
+
+```
+
+
+## Modélisation de composantes non stationnaires : 
+
+### Simulation ARMA non stationnaires 
+
+```{r}
+p = 1 #valeur de p
+q = 1 #valeur de q
+alpha = c(.9) #alpha
+beta = c(.8) #beta
+sig = .1 #sigma
+time = 10^3
+x = arima.sim(model = list(ar = alpha, ma = beta),
+              sd = sig,
+              n = time) #simulation modèle ARMA(1,1)
+y = x + .1 * (1:time) #ajout tendance linaire
+plot(
+  y,
+  main = "Simulation d'un processus ARMA(1,1) non stationnaire",
+  ylab = "Valeurs simulées",
+  xlab = "Temps",
+  type = "l",
+  col = palette_couleur[1],
+  lwd = 2
+)
+
+```
+Commentaire : 
+
+On voit que le processus n'est pas stationnaire, il y a une tendance linéaire.
+
+
+### Stationnarisation possible, la différence première : 
+
+```{r}
+plot(diff(y), 
+     main = "Différence première d'un processus ARMA(1,1) non stationnaire",
+     ylab = "Valeurs simulées",
+     xlab = "Temps",
+     type = "l",
+     col = palette_couleur[1],
+     lwd = 2)
+
+```
+
+#### Ajustement du modèle ARMA(p, q+1) pour la différence première :
+
+```{r}
+arma = arima(diff(y), order = c(p, 0, q+1))
+arma_centrée = arima(diff(y)-mean(diff(y)), order = c(p, 0, q+1))
+arma
+arma_centrée
+
+```
+
+Commentaire : 
+
+La série diff(y) n'est pas de moyenne nulle pourtant la fonction arima considère que la série est centrée. 
+
+#### Ajustement du modèle ARMA(p,q+1) sur la série temporelle initiale : 
+
+```{r}
+arma2 = arima(y, order = c(p, 0, q+1))
+arma2
+
+```
+
+## Illustration des séries temporelles avec de la saisonnalité : 
+
+### Série temporelle avec saisonnalité et sans tendance : 
+
+```{r}
+plot(USAccDeaths, 
+     main = "Décès aux USA",
+     ylab = "Nombre de décès",
+     xlab = "Temps",
+     type = "l",
+     col = palette_couleur[1],
+     lwd = 2)
+
+```
+
+
+```{r}
+plot(diff(USAccDeaths), 
+     main = "Différence première des décès aux USA",
+     ylab = "Nombre de décès",
+     xlab = "Temps",
+     type = "l",
+     col = palette_couleur[1],
+     lwd = 2)
+```
+### Série temporelle avec saisonnalité et tendance : 
+
+```{r}
+plot(diff(USAccDeaths, lag = 12), 
+     main = "Différence première des décès aux USA",
+     ylab = "Nombre de décès",
+     xlab = "Temps",
+     type = "l",
+     col = palette_couleur[1],
+     lwd = 2)
+```
+
+### Série sans saisonnalité et sans tendance : 
+
+
+```{r}
+plot(diff(diff(USAccDeaths, lag = 12)), 
+     main = "Différence seconde des décès aux USA",
+     ylab = "Nombre de décès",
+     xlab = "Temps",
+     type = "l",
+     col = palette_couleur[1],
+     lwd = 2)
+```
+
+#### Diminution de la taille de la série : 
+
+```{r}
+dt = data.frame(
+  Longueur = c(length(USAccDeaths), length(diff(USAccDeaths)), length(diff(USAccDeaths, lag = 12)), length(diff(diff(USAccDeaths, lag = 12)))),
+  Différence = c("Aucune", "Première", "Première + lag 12", "première de (première + lag 12)")) 
+dt
+  
+```
+
+
+
+## Modéles paramètriques saisonniers : 
+
+```{r}
+plot(AirPassengers, 
+     main = "Evolution du nombre de passagers aériens",
+     ylab = "Nombre de passagers",
+     xlab = "Année",
+     type = "l",
+     col = palette_couleur[1],
+     lwd = 2)
+```
+
+Commentaire : 
+
+Augmentation de l'amplitude du cycle saisonnier et la tendance au cours du temps. 
+
+### Stabilisation du cycle saisonnier par application du log : 
+
+```{r}
+plot(log(AirPassengers), 
+     main = "log : Evolution du nombre de passagers aériens",
+     ylab = "Nombre de passagers",
+     xlab = "Année",
+     type = "l",
+     col = palette_couleur[1],
+     lwd = 2)
+```
+
+Commentaire : 
+
+Il est préférable de prendre un modèle multiplicatif pour les séries temporelles avec une tendance exponentielle. A l'inverse les séries temporelles avec une tendance linéaire peuvent être modélisées par un modèle additif.
+
+
+### Estimation des paramètres de la saisonnalité : 
+
+
+```{r}
+Time = length(USAccDeaths)
+data = data.frame(
+  USAccDeaths,
+  t = 1:Time,
+  t2 = (1:Time) ^ 2,
+  cos = cos(2 * pi * (1:Time) / 12),
+  sin = sin(2 * pi * (1:Time) / 12)
+)
+fit = lm(USAccDeaths ~ ., data = data)
+plot(
+  1:Time,
+  USAccDeaths,
+  main = "Décès aux USA",
+  ylab = "Nombre de décès",
+  xlab = "Temps",
+  type = "l",
+  col = palette_couleur[1],
+  lwd = 2
+)
+lines(1:Time, fit$fitted.values, col = palette_couleur[2], lwd = 2)
+legend(
+  'topleft',
+  c('Série temporelle', 'Tendance estimée'),
+  col = palette_couleur[1:2],
+  lwd = 2
+)
+```
+
+### Vérification du choix d'estimation de la composante saisonnière : 
+
+```{r}
+plot(fit$residuals, 
+     main = "Résidus",
+     ylab = "Résidus",
+     xlab = "Temps",
+     type = "l", col = palette_couleur[1], lwd = 2)
+
+acf(fit$residuals, main = "ACF des résidus")
+
+```
+
+Commentaire : 
+
+La saisonnalité n'est pas bien modélisée, on remarque qu'il reste un tendance dans les résidus notamment tous les 12 mois.
+
+## Lissage non paramétrique :
+
+```{r}
+# Estimation de la tendance par moyenne mobile : 
+plot(log(AirPassengers), 
+     main = "Lissage non paramétrique",
+     ylab = "Nombre de passagers",
+     xlab = "Temps",
+     type = "l",
+     col = palette_couleur[1],
+     lwd = 2)
+# Fenètre de largeur 1 an :
+L = 12 
+hatx = stats::filter(log(AirPassengers), filter = rep(1 / (L), L))
+lines(hatx,
+      col = palette_couleur[2],
+      lwd = 2) #estimateur non paramétrique de la tendance
+
+# Fenètre de largeur 3 ans :
+L = 36 
+hatx = stats::filter(log(AirPassengers), filter = rep(1 / (L), L))
+lines(hatx,
+      col = palette_couleur[3],
+      lwd = 2) #lissage plus important
+# Fenètre de largeur 6 mois :
+L = 6 
+hatx = stats::filter(log(AirPassengers), filter = rep(1 / (L), L))
+lines(hatx,
+      col = palette_couleur[4],
+      lwd = 2) #composante saisonnière toujours présente
+legend(
+  'topleft',
+  c('Série temporelle', 'Lissage 1 an', 'Lissage 3 ans', 'Lissage 6 mois'),
+  col = palette_couleur[1:4],
+  lwd = 2
+)
+
+```
+
+### Décomposition de la série temporelle, méthode des moyennes mobiles : 
+
+```{r}
+plot(decompose(USAccDeaths), lwd = 2, 
+     col = palette_couleur[1])
+
+plot(decompose(log(AirPassengers)), lwd = 2, 
+     col = palette_couleur[2])
+
+```
+
+
+### Décomposition de la série temporelle, méthode STL : 
+
+Commentaire : 
+
+La fonction stl décompose la série temporelle en trois composantes : saisonnalité,
+tendance et résidus. Elle n'utilise pas la méthodes des moyennes mobiles, mais une méthode de lissage basée sur la régression polynomiale.
+
+```{r}
+plot(stl(log(AirPassengers), s.window = 12), 
+     main = "log : Décomposition d'AirPassenger, méthode stl",
+     lwd = 2, 
+     col = palette_couleur[2])
+
+```
+
 ```{r echo=FALSE}
 rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
 ```
+
+
+\clearpage
+\newpage
 
 # Travaux dirigés 
 
@@ -427,7 +972,6 @@ acf(E,
 Commentaire : 
 
 Le processus n'est pas stationnaire il y a une tendance dans la variance.
-
 
 ```{r echo=FALSE}
 rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
@@ -921,8 +1465,6 @@ cat("Pourcentage de valeur dans l'intervalle = ", round(IC_pr_value,4), "\n")
 rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
 ```
 
-
-
 ## Exercice 7 : 
 
 ### Trouver les racines d'un polynôme caractéristique : 
@@ -1021,4 +1563,5 @@ data.frame(
 rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
 ```
 
+# Annales : 
 
