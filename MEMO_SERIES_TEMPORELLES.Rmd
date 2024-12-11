@@ -342,24 +342,33 @@ Commentaire : quand les paramètres sont inconnus on peut utiliser des critères
 #### Méthode de sélection par boucle : 
 
 ```{r}
-pmax = 5 #valeur max pour p
-qmax = 5 #valeur max pour q
-AIC = matrix(0, nrow = pmax + 1, ncol = qmax + 1) #tableau pour stocker les valeurs du AIC
-for (p in 0:pmax) {
-  for (q in 0:qmax) {
-    AIC[p + 1, q + 1] = arima(x, order = c(p, 0, q))$aic #calcul du AIC
+SELECTION_ARMA <- function(x,pmax, qmax, print_result = TRUE) {
+  AIC = matrix(0, nrow = pmax + 1, ncol = qmax + 1) #tableau pour stocker les valeurs du AIC
+  for (p in 0:pmax) {
+    for (q in 0:qmax) {
+      AIC[p + 1, q + 1] = arima(x, order = c(p, 0, q))$aic #calcul du AIC
+    }
   }
+  
+  colnames(AIC) <- paste("q =", 0:qmax)
+  rownames(AIC) <- paste("p =", 0:pmax)
+  #AIC
+  
+  # On renvoie l'indice du minimun de AIC :
+  p = which(AIC == min(AIC), arr.ind = TRUE)[1] - 1
+  q = which(AIC == min(AIC), arr.ind = TRUE)[2] - 1
+  
+  if(print_result == TRUE){
+    cat("Meilleur modèle ARMA(p,q) : p = ", p, " q = ", q, 
+        "Valeur de l'AIC : ", min(AIC), "\n", "\n")
+    cat("Tableau des AIC : \n")
+    #AIC
+  }
+  return(list(AIC, p, q))
 }
 
-colnames(AIC) <- paste("q =", 0:qmax)
-rownames(AIC) <- paste("p =", 0:pmax)
-AIC
-
-# On renvoie l'indice du minimun de AIC :
-p = which(AIC == min(AIC), arr.ind = TRUE)[1] - 1
-q = which(AIC == min(AIC), arr.ind = TRUE)[2] - 1
-
-cat("Meilleur modèle ARMA(p,q) : p = ", p, " q = ", q, "\n")
+# Fonction de sélection :
+SELECTION_ARMA(x, pmax = 5, qmax = 5)
 
 ```
 
@@ -1481,8 +1490,6 @@ Proposition si le module des racines est supérieur à 1 alors le processus est 
 
 ### Calcul de l'ACF avec Yule-Walker à l'aide du système d'équations : 
 
-
-
 ```{r}
 alpha1 = 0.1
 alpha2 = -0.3
@@ -1562,6 +1569,215 @@ data.frame(
 ```{r echo=FALSE}
 rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
 ```
+
+
+#### A reprendre #### : 
+
+
+## Exercice 8 : Modélisation de taux de Vasicek :
+
+Le modèle de Vasicek est un modèle de taux d'intérêt qui est souvent utilisé pour modéliser les taux d'intérêt à court terme. Le modèle est donné par l'équation différentielle stochastique suivante :
+
+$$
+dr_t = -\alpha(r_t- \mu)dt + \sigma dW_t
+$$
+
+où $r_t$ est le taux d'intérêt à l'instant t, $_alpha$ est la vitesse de réversion, $\mu$ est le niveau de long terme, $\sigma$ est la volatilité et $W_t$ est un mouvement brownien.
+
+
+On peut montrer que si $R_t$ est solution de l'équation différentielle stochastique ci-dessus, alors $R_t$ est une solution de l'équation différentielle stochastique suivante :
+
+$$
+R_t = R_{t-1}e^{-\alpha} + \mu(1-e^{-\alpha}) + \sigma \int_{t-1}^{t} e^{-\alpha(t-s)}dW_s
+$$
+Avec en particulier :
+
+
+$$
+\int_{t-1}^{t} e^{-\alpha(t-s)}dW_s \approx \mathcal{N}(0, \frac{\sigma^2}{2\alpha}(1-e^{-2\alpha}))
+$$
+
+### Création d'un objet ts avec les données EURIBOR : 
+
+```{r}
+z <- read.csv("DATA/EURIBOR.csv", header = TRUE)
+x = ts(data = z[, 3],
+       start = c(1994, 1),
+       frequency = 12) #création d'on objet de type ts
+# La fréquence est de 12 car les données sont mensuelles
+
+plot(x, col = palette_couleur[1], 
+     main = "Evolution du taux EURIBOR",
+     ylab = "Taux EURIBOR",
+     xlab = "Temps", 
+     lwd = 2)
+```
+
+### Séparation des données train et test : 
+
+
+```{r}
+train = window(x, end = 2012.999) #séquence d'apprentissage
+test = window(x, start = 2013) #séquence de test
+```
+
+### Fonction d'autocorrélation sur la séquence d'apprentissage
+
+```{r}
+acf(train, lag.max = 5 * 12)
+```
+
+
+Pour un processus AR(1), la fonction d'autocorrélation décroit à une vitesse exponentielle vers 0 
+
+### Ajustement d'un modèle AR(1) sur la séquence d'apprentissage : 
+
+```{r}
+fit <- ar(train, aic = FALSE, order.max = 1)
+
+```
+
+Commentaire : Comme la série n'est pas centrée on utilise pas l'argument dmean = FALSE. La série est alors automatiquement centrée.
+
+#### Comparaison des ACF : 
+
+```{r}
+lmax = 5 * 12 # 5 ans
+ACFemp = acf(train, lag.max = lmax, col = palette_couleur[1])
+acfAR = ARMAacf(ar = fit$ar, lag.max = lmax)
+lines(ACFemp$lag, acfAR, col = palette_couleur[2])
+```
+
+Commentaire : 
+L'acf du modèle ajusté proche de l'acf empirique seulement pour premiers lags. 
+
+### Test sur les résidus empiriques : 
+
+```{r}
+epsilon = fit$resid #résidu empirique renvoyé par fonction ar
+epsilon = epsilon[!is.na(epsilon)]
+qqnorm(epsilon) #le résidu suit-il une loi normale?
+qqline(epsilon)
+shapiro.test(epsilon) #on refuse l'hypothèse de Gaussianité
+acf(epsilon) #le résidu est-il un bruit blanc?
+Box.test(epsilon, lag = 20) #le test de Portementeau refuse l'hypothèse de bruit blanc
+
+```
+
+
+Commentaires : 
+
+La plupart des coefficients de l'ACF empiriques ne sont pas dans l'intervalle de fluctuation en bleu, C'est une indication que le résidu n'est pas un bruit blanc. Le test de Portementeau refuse l'hypothèse de bruit blanc. Le test de Shapiro refuse l'hypothèse de normalité.  
+Le modèle AR(1) n'est pas valide, on pourrait tester un modèle ARMA plus complexe. 
+
+### Prévision sur la séquence de test : 
+```{r}
+pm <- forecast(fit, h = length(test)) #représentation graphique
+plot(pm,
+     main = "Prévision du taux EURIBOR",
+     ylab = "Taux EURIBOR",
+     xlab = "Temps", 
+     col = palette_couleur[2], 
+     lwd = 2)
+
+```
+
+Commentaires : 
+La prévision ponctuelle (courbe bleue) converge vers la moyenne empirique sur la séquence d'apprentissage ('retour à la moyenne'), 
+la largeur de l'intervalle de prédiction augmente avec l'horizon de prédiction, les observations sont bien dans l'intervalle de prédiction à 95%. 
+
+## Exerice 9 : 
+
+### Calcul de l'autocovariance à partir des paramètres : 
+
+Dans un premier temps on résoud le système de telle sorte à trouver les valeurs de gamma. 
+On résoud le problème avec seulement deux équations en isolant la valeur de gamma 2 qui dépend des valeurs de gamma 1
+
+```{r}
+alpha = 0.8
+beta = 0.5
+sigma = 1
+A = matrix(c(-alpha, 1, 1,-alpha), nrow = 2)
+b = c(beta * sigma ^ 2,
+      sigma ^ 2 * (1 + beta ^ 2 + alpha * beta))
+v_gamma = solve(A, b)
+v_gamma = c(v_gamma, alpha * v_gamma[2])
+
+# Fonction auto-corrélation réelle :
+dt = data.frame(theorique_r = ARMAacf(ar = alpha, ma = beta)[1:3],
+                theorique = v_gamma / v_gamma[1])
+round(dt, 4)
+```
+
+
+### Calcul de l'autocovariance par simulation : 
+
+```{r}
+x = arima.sim(model = list(ar = alpha, ma = beta), sd = sigma, n = 10 ^ 5)
+acf_sim = acf(x, lag.max = 3, plot = FALSE, type = 'covariance')
+
+dt = data.frame(simulation = acf_sim$acf[1:3],
+                theorique = v_gamma )
+round(dt,5)
+```
+
+### Ajustements par la méthode des moments: 
+
+On considère que alpha est connu ainsi on peut estimer beta et sigma par la méthode des moments.~
+On créer une fonction a optimiser pour obtenir les valeurs de beta et sigma. 
+
+#### Fonction d'estimation des moments : 
+
+```{r}
+f_estim_moment = function(theta, r, alpha) {
+  beta = theta[1]
+  sig = theta[2]
+  A = matrix(c(-alpha, 1, 1, - alpha), nrow = 2)
+  x = c(r[1], r[2]) 
+  b = c(beta * sig ^ 2, sig ^ 2 * (1 + beta ^ 2 + alpha * beta))
+  d = A %*% x - b
+  return(sum(d ^ 2))
+}
+
+```
+
+#### Estimation des paramètres : 
+
+Dans cette fonction, on prend les valeurs simulées des covariances gamma. Ainsi on obtientl la valeur d'alpha. On initialise des paramètres beta et sigma. On optimise la fonction d'estimation des moments pour obtenir les valeurs de beta et sigma. 
+
+```{r}
+fitARIMA11 = function(x) {
+  acfsim = acf(x,
+               lagmax = 3,
+               plot = FALSE,
+               type = 'covariance')  #calcul de l'acf
+  r = acfsim$acf[1:3]
+  a = r[3] / r[2]  #estimation de alpha
+  theta0 = c(0, .5)  #valeur initiale des paramètres
+  thetaf = optim(theta0, f_estim_moment, r, a, gr=NULL)$par
+  return(list(
+    alpha1 = a,
+    beta1 = thetaf[1],
+    sigma = thetaf[2]
+  ))
+}
+
+y_theo <- fitARIMA11(x)  
+y = arima(x,order=c(1,0,1))  
+
+dt = data.frame(
+  théorique = unlist(y_theo),
+  estimation = c(y$coef[1:2], y$sigma2)
+)
+rownames(dt) = c("alpha", "beta", "sigma")
+round(dt, 4)
+```
+
+```{r echo=FALSE}
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+
+```
+
 
 # Annales : 
 
