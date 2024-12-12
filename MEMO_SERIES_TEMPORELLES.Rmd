@@ -1778,6 +1778,395 @@ rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
 
 ```
 
+## Exercice 14 : 
+
+### Importation des données : 
+
+```{r}
+library(readr)
+data <- read_csv("DATA/DATA_METEO_BREST.txt", skip = 19)
+Temp <- data$TG / 10
+période = 365.25
+y = ts(Temp, start = c(1945,1,1), frequency = période)
+```
+
+### Représentation graphique : 
+
+```{r}
+plot(
+  y,
+  main = "Evolution de la température à Brest",
+  ylab = "Température",
+  xlab = "Temps",
+  col = palette_couleur[1],
+  lwd = 2
+)
+
+```
+
+
+Commentaire : 
+
+On peut identifier une tendance (réchauffement climatique) 
+et une composante saisonnière (il fait plus chaud en été qu'en hiver)
+
+### Sélection des bases test et train : 
+
+```{r}
+yap = stats::window(y, start = 1945, end = 2023)
+yval = stats::window(y, start = 2023)
+```
+
+
+### Décomposition de la série à l'aide de decompose :
+
+```{r}
+dec = decompose(yap)
+plot(dec)
+```
+
+#### Moyenne mobile 1 ans et fonction decompose : 
+
+```{r}
+trend <- function(yap,year) {
+  L = year*365
+  trend = stats::filter(yap, rep(1/L, L))
+  return(trend)
+}
+trend_1ans = trend(yap,1)
+plot(
+  dec$trend,
+  type = "l",
+  col = palette_couleur[1],
+  main = "Tendance estimée et moyenne mobile 1 an",
+  xlab = "Année",
+  ylab = "Température (°C)"
+)
+lines(trend_1ans, col = palette_couleur[2], lty = 2)
+legend('topleft', legend = c("Tendance estimée", "Moyenne mobile 1 an"),
+col = palette_couleur[1:2], lty = 1:2)
+
+```
+#### Moyenne mobile sur 1, 5, 10 et 30 ans : 
+
+
+```{r}
+plot(
+  dec$trend,
+  type = "l",
+  col = palette_couleur[1],
+  main = "Tendance estimée et moyenne mobile 1 an",
+  xlab = "Année",
+  ylab = "Température (°C)"
+)
+lines(trend(yap,1), col = palette_couleur[2], lty = 2)
+lines(trend(yap,5), col = palette_couleur[3], lty = 3)
+lines(trend(yap,10), col = palette_couleur[4], lty = 4)
+lines(trend(yap,30), col = palette_couleur[5], lty = 5)
+legend('bottomright', legend = c("Tendance estimée", "Moyenne mobile 1 an", "Moyenne mobile 5 ans", "Moyenne mobile 10 ans", "Moyenne mobile 30 ans"),
+col = palette_couleur[1:5], lty = 1:5)
+
+
+```
+
+Commentaires : 
+
+L'estimation de la tendance obtenue avec une fenêtre de largeur 1 an est trop "bruitée"
+Plus on augmente la largeur de la fenêtre, plus l'estimation obtenue est "lisse"
+Plus on augmente la largeur de la fenêtre, plus on perd des observations au début et à la fin de la séquence
+Les moyennes mobiles permettent de faire ressortir des évolutions à long terme
+Utile pour visualiser la tendance et trouver un modèle paramétrique adapté
+
+#### Créer une série sans tendances : 
+
+```{r}
+yst = yap - dec$trend
+plot(
+  yst,
+  type = "l",
+  col = palette_couleur[1],
+  main = "Série temporelle sans tendance",
+  xlab = "Année",
+  ylab = "Température (°C)")
+```
+#### Calcul des moyennes saisonnières :
+
+```{r}
+# Moyenne par jour des éléments : 
+library(lubridate)
+date = date_decimal(as.numeric(time(yap)))
+seas = rep(0, 365)
+for (i in 1:365) {
+  #boucle sur les 365 jours de l'année
+  ind = which(day(date) == day(date)[i] &
+                month(date) == month(date)[i])  #recherche de toutes les observations pour un jour donné
+  seas[i] = mean(yst[ind], na.rm = TRUE)  #calcul de la moyenne
+}
+
+# Création de la séquence de date sur un an pour la représentation graphique
+x = seq(1, 365, length = 365)
+# Passer en format date : 
+date = as.Date(x, origin = "2050-01-01")
+
+plot(
+  date,
+  seas,
+  type = 'l',
+  main = "Moyenne saisonnière",
+  xlab = "Jour de l'année",
+  ylab = "Température (°C)",
+  col = palette_couleur[1],
+  lwd = 2
+)
+lines(dec$seasonal[1:365], col = palette_couleur[2], lwd = 2)
+legend(
+  'topleft',
+  legend = c("Moyenne saisonnière", "Saisonnalité estimée"),
+  col = palette_couleur[1:2],
+  lty = 2
+)
+```
+
+Commentaires : 
+
+Les deux courbes sont très proches, la saisonnalité est bien capturée par la décomposition. Ils ne sont pas identiques, la différence est peut-être due aux années bissextiles.
+
+### Modélisation paramètrique de la composante non stationnaire : 
+
+On modélise la tendance par une régression linéaire avec des composantes trigonométriques pour la saisonnalité et une tendance quadratique.
+
+
+```{r}
+Time = as.vector(time(yap)) 
+data = data.frame(yap, t = Time, t2 = Time ^ 2,  #tendance quadratique
+                  cos = cos(2 * pi * Time), sin = sin(2 * pi * Time),
+                  cos2 = cos(4 * pi * Time), sin2 = sin(4 * pi * Time))  
+fit = lm(yap ~ ., data = data)  #ajustement modèle par moindre carré
+summary(fit)
+
+```
+Commentaire : 
+
+On rappelle que les p-value ne sont pas valides si les résidus ne sont pas iid. 
+
+#### Parenthèse sur les résidus : 
+
+##### On regarde si les résidus sont iid à l'aide du test de Durbin-Watson : 
+
+Explication du test de Durbin-Watson :
+
+\begin{itemize}
+  \item $H_0$ : Les résidus sont iid
+  \item $H_1$ : Les résidus ne sont pas iid
+\end{itemize}
+
+```{r}
+# Test de Durbin-Watson d'autocorrélation des résidus
+library(car)
+durbinWatsonTest(fit)  
+```
+
+Commentaire :
+
+Les résidus ne sont pas iid, on peut essayer de les modéliser par un modèle ARMA.
+
+##### On peut vérifier que les résidus sont un bruit blanc : 
+
+
+```{r}
+acf(fit$residuals, 
+    main = "ACF des résidus",
+    col = palette_couleur[1])  
+```
+
+Commentaire : 
+
+On voit à nouveau que les résidus ne sont pas un bruit blanc.
+
+#### Représentation graphique : 
+
+```{r}
+plot(
+  Time,
+  yap,
+  type = "l",
+  main = "Série temporelle initiale",
+  xlab = "Année",
+  ylab = "Température (°C)",
+  col = palette_couleur[1],
+  lwd = 2
+)
+lines(
+  Time,
+  fit$fitted.values,
+  col = palette_couleur[2],
+  lwd = 2
+)
+legend(
+  'bottomright',
+  legend = c("Série temporelle initiale", "Tendance et saisonnalité estimées"),
+  col = palette_couleur[1:2],
+  lty = 1
+)
+
+```
+#### Comparaison avec la fonction decompose : 
+
+```{r}
+plot(
+  dec$seasonal + dec$trend,
+  xlim = c(2000, 2022),
+  main = "Comparaison avec decompose",
+  xlab = "Année",
+  ylab = "Température (°C)",
+  col = palette_couleur[1],
+  lwd = 2
+)
+lines(ts(
+  fit$fitted.values,
+  start = c(1945, 1, 1),
+  frequency = 365.25
+),
+col = palette_couleur[2],
+lwd = 2)
+legend(
+  'bottomright',
+  legend = c("Série temporelle initiale", "Tendance et saisonnalité estimées"),
+  col = palette_couleur[1:2],
+  lty = 1
+)
+
+```
+
+Commentaire : 
+
+Les deux estimateurs sont relativement proches mais le modèle paramétrique est plus "lisse".
+
+### Modélisation de la composante stationnaire :
+
+```{r}
+xap = ts(fit$residuals,
+         start = c(1945, 1, 1),
+         frequency = 365.25)  #série stationnarisée
+# Test si c'est un bruit blanc : 
+acf(xap, 
+    main = "ACF des résidus",
+    col = palette_couleur[1])
+  
+```
+
+Commentaire : 
+La série n'est pas une réalisation d'un bruit blanc.
+
+### Modélisation ARMA : 
+
+```{r}
+SELECTION_ARMA <- function(x,pmax, qmax, print_result = TRUE) {
+  AIC = matrix(0, nrow = pmax + 1, ncol = qmax + 1) #tableau pour stocker les valeurs du AIC
+  for (p in 0:pmax) {
+    for (q in 0:qmax) {
+      AIC[p + 1, q + 1] = arima(x, order = c(p, 0, q))$aic #calcul du AIC
+    }
+  }
+  
+  colnames(AIC) <- paste("q =", 0:qmax)
+  rownames(AIC) <- paste("p =", 0:pmax)
+  #AIC
+  
+  # On renvoie l'indice du minimun de AIC :
+  p = which(AIC == min(AIC), arr.ind = TRUE)[1] - 1
+  q = which(AIC == min(AIC), arr.ind = TRUE)[2] - 1
+  
+  if(print_result == TRUE){
+    cat("Meilleur modèle ARMA(p,q) : p = ", p, " q = ", q, 
+        "Valeur de l'AIC : ", min(AIC), "\n", "\n")
+    cat("Tableau des AIC : \n")
+    AIC
+  }
+  return(list(AIC, p, q))
+}
+S_ARMA <- SELECTION_ARMA(xap, 4,4)
+
+mod = arima(xap, order = c(S_ARMA[[2]], 0, S_ARMA[[3]]))
+
+library(forecast)
+mod_bis = auto.arima(xap,
+                     stationary = TRUE,
+                     seasonal = FALSE,
+                     trace = TRUE)
+```
+
+#### Validation du modèle : 
+
+```{r}
+tsdiag(mod)  #résidu proche d'un bruit blanc
+checkresiduals(mod)
+
+checkresiduals(mod_bis)
+
+```
+
+### Prédiction du modèle : 
+
+```{r}
+# Prédiction de la partie stationnaire : 
+pred_stat = predict(mod, n.ahead = length(yval))
+
+# Prédiction de la partie non stationnaire : 
+Time = as.vector(time(yval))
+datan = data.frame(t = Time, t2 = Time ^ 2,
+                   cos = cos(2 * pi * Time), sin = sin(2 * pi * Time),
+                   cos2 = cos(4 * pi * Time), sin2 = sin(4 * pi * Time))
+pred_non_stat = predict(fit, datan, interval='confidence')
+
+# Prédiction finale :
+pred_all = pred_non_stat[,1] + pred_stat$pred
+
+# On crée les intervalles de confiance comme sommes des intervalles de confiance
+
+dt_IC = data.frame(
+  Lower = pred_stat$pred - 1.96*pred_stat$se + pred_non_stat[,2],
+  Value = pred_all, 
+  Upper = pred_stat$pred + 1.96*pred_stat$se + pred_non_stat[,3]
+)
+
+```
+Commentaire : 
+
+On a choisi de sommer les intervalles de confiance pour obtenir l'intervalle de prédiction.
+
+#### Représentation graphique : 
+
+```{r}
+
+plot(dt_IC$Value, 
+     main = "Prédiction de la température à Brest",
+     xlab = "Année",
+     ylab = "Température (°C)",
+     col = palette_couleur[1],
+     lwd = 2, 
+     ylim = c(floor(min(dt_IC$Lower)),ceiling(max(dt_IC$Upper))))
+lines(dt_IC$Lower, 
+      col = palette_couleur[2],
+      lty = 2)
+lines(dt_IC$Upper, 
+      col = palette_couleur[3],
+      lty = 2)
+legend(
+  'bottomright',
+  legend = c("Prédiction", "Lower", "Upper"),
+  col = palette_couleur[1:3],
+  lty = 1
+)
+
+```
+
+```{r echo=FALSE}
+
+rm(list = setdiff(ls(), "palette_couleur")) # Nettoyage de l'environnement
+
+```
+
 
 # Annales : 
 
